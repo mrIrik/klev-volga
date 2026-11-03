@@ -1,8 +1,8 @@
 // Service worker: оболочка приложения — из кэша, погода — сначала сеть, потом кэш
-const VERSION = 'klev-v1';
+const VERSION = 'klev-v4';
 const SHELL = [
   './', './index.html', './styles.css', './manifest.webmanifest',
-  './js/app.js', './js/astro.js', './js/fish.js', './js/model.js', './js/places.js', './js/weather.js',
+  './js/app.js', './js/art.js', './js/astro.js', './js/fish.js', './js/model.js', './js/places.js', './js/weather.js',
   './icons/icon.svg', './icons/icon-192.png', './icons/icon-512.png', './icons/apple-touch-icon.png',
 ];
 
@@ -35,16 +35,15 @@ self.addEventListener('fetch', e => {
 
   if (url.origin !== location.origin) return;
 
-  // stale-while-revalidate для файлов приложения
+  // файлы приложения: сначала сеть (чтобы обновления приходили сразу), без сети — кэш
   e.respondWith(
-    caches.open(VERSION).then(async cache => {
-      const cached = await cache.match(req, { ignoreSearch: req.mode === 'navigate' }) ||
-        (req.mode === 'navigate' ? await cache.match('./index.html') : null);
-      const net = fetch(req).then(res => {
+    caches.open(VERSION).then(cache =>
+      fetch(req).then(res => {
         if (res.ok && res.type === 'basic') cache.put(req, res.clone());
         return res;
-      }).catch(() => cached);
-      return cached || net;
-    })
+      }).catch(async () =>
+        (await cache.match(req, { ignoreSearch: true })) ||
+        (req.mode === 'navigate' ? await cache.match('./index.html') : Response.error()))
+    )
   );
 });

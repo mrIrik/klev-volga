@@ -1,34 +1,21 @@
 :root {
-  --bg: #e9f1f3;
-  --bg-grad: linear-gradient(180deg, #d7e8ec 0%, #e9f1f3 260px);
-  --card: #ffffff;
-  --card-2: #f3f7f8;
-  --text: #13252d;
-  --muted: #5d717a;
-  --line: #d5e1e5;
-  --accent: #0d6f80;
-  --accent-ink: #ffffff;
-  --top: rgba(233, 241, 243, .82);
-  --s1: #c2412d; --s2: #d9821f; --s3: #c9a514; --s4: #6aa52a; --s5: #1f9a55;
-  --shadow: 0 1px 2px rgba(10, 40, 50, .06), 0 6px 18px rgba(10, 40, 50, .07);
+  /* Тёмно-серая гамма с голубыми акцентами (одна тема для дня и ночи) */
+  --bg: #13171c;
+  --bg-grad: radial-gradient(120% 60% at 50% -10%, #22303d 0%, rgba(19, 23, 28, 0) 70%);
+  --card: #1e242b;
+  --card-2: #283039;
+  --text: #e3e9ef;
+  --muted: #8a97a5;
+  --line: #2c343e;
+  --accent: #5cc3f2;
+  --accent-ink: #0b1a24;
+  --top: rgba(19, 23, 28, .84);
+  /* шкала клёва: от серого к яркому голубому */
+  --s1: #6b7784; --s2: #5f88ab; --s3: #4aa2d6; --s4: #4cc0f2; --s5: #9ee3ff;
+  --neg: #b48a8a;
+  --shadow: 0 1px 2px rgba(0, 0, 0, .35), 0 10px 24px rgba(0, 0, 0, .28);
   --radius: 18px;
-  color-scheme: light;
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0a161d;
-    --bg-grad: linear-gradient(180deg, #0f2834 0%, #0a161d 280px);
-    --card: #12232c;
-    --card-2: #182d38;
-    --text: #e4eef1;
-    --muted: #8ea4ad;
-    --line: #233a46;
-    --accent: #3fb6c6;
-    --accent-ink: #062027;
-    --top: rgba(10, 22, 29, .82);
-    --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 8px 20px rgba(0, 0, 0, .25);
-    color-scheme: dark;
-  }
+  color-scheme: dark;
 }
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -57,7 +44,7 @@ h1, h2, h3 { margin: 0; line-height: 1.2; }
 .place-btn { display: flex; align-items: center; gap: 6px; min-width: 0; font-weight: 700; font-size: 19px; }
 .place-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .status { flex: 1; text-align: right; font-size: 12px; color: var(--muted); line-height: 1.25; min-width: 0; }
-.status .off { color: var(--s2); font-weight: 600; }
+.status .off { color: var(--accent); font-weight: 600; }
 .icon-btn {
   border: 0; background: var(--card); width: 38px; height: 38px; border-radius: 12px;
   display: grid; place-items: center; box-shadow: var(--shadow); cursor: pointer; flex: none;
@@ -87,7 +74,7 @@ h1, h2, h3 { margin: 0; line-height: 1.2; }
 .section { margin: 18px 0 8px; display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
 .section h2 { font-size: 17px; }
 .section .sub { font-size: 13px; color: var(--muted); }
-.card { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); }
+.card { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); border: 1px solid rgba(255, 255, 255, .04); }
 .muted { color: var(--muted); }
 .small { font-size: 13px; }
 .btn {
@@ -105,13 +92,16 @@ h1, h2, h3 { margin: 0; line-height: 1.2; }
 }
 .chip.active { background: var(--accent); color: var(--accent-ink); border-color: transparent; font-weight: 600; }
 
+.app-title { font-size: 24px; font-weight: 800; letter-spacing: -.01em; margin: 4px 0 14px; line-height: 1.15;
+  background: linear-gradient(90deg, #e3e9ef 0%, #8fd6fb 100%); -webkit-background-clip: text; background-clip: text; color: transparent; }
+
 /* Погодные условия */
 .cond { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 .cond .c { background: var(--card); border-radius: 14px; padding: 9px 10px; box-shadow: var(--shadow); min-width: 0; }
 .cond .k { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
 .cond .v { font-size: 17px; font-weight: 700; display: flex; align-items: center; gap: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cond .d { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.trend-up { color: var(--s4); } .trend-down { color: var(--s2); }
+.trend-up { color: var(--accent); } .trend-down { color: var(--neg); }
 
 /* Слайдер времени */
 .timepick { margin-top: 12px; padding: 12px 14px; }
@@ -122,7 +112,7 @@ input[type=range] { width: 100%; accent-color: var(--accent); margin: 8px 0 0; }
 /* Карточки рыб */
 .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .fish-card { display: flex; flex-direction: column; padding: 12px 12px 12px; position: relative; overflow: hidden; }
-.fish-card .art { margin: -2px -6px 2px; aspect-ratio: 2 / 1; }
+.fish-card .art { margin: -12px -12px 6px; aspect-ratio: 2 / 1; padding: 6px 4px 0; background: radial-gradient(90% 85% at 50% 45%, #2b3d4d 0%, #1e242b 75%); }
 .fish-art { width: 100%; height: 100%; display: block; }
 .fish-card .name { font-weight: 700; font-size: 17px; }
 .fish-card .row { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
@@ -135,7 +125,8 @@ input[type=range] { width: 100%; accent-color: var(--accent); margin: 8px 0 0; }
 /* Детали */
 .back { display: inline-flex; align-items: center; gap: 4px; color: var(--accent); font-weight: 600; margin-bottom: 8px; }
 .hero { padding: 14px 16px 16px; }
-.hero .art { aspect-ratio: 2 / 1; max-width: 460px; margin: 0 auto; }
+.hero .art { aspect-ratio: 2 / 1; margin: -14px -16px 8px; padding: 10px 12px 0; background: radial-gradient(80% 80% at 50% 45%, #2e4354 0%, #1e242b 75%); border-radius: var(--radius) var(--radius) 0 0; }
+.hero .art .fish-art { max-width: 480px; margin: 0 auto; }
 .hero-head { display: flex; align-items: center; gap: 14px; }
 .hero h1 { font-size: 26px; }
 .hero .latin { font-style: italic; color: var(--muted); font-size: 14px; }
@@ -153,13 +144,11 @@ input[type=range] { width: 100%; accent-color: var(--accent); margin: 8px 0 0; }
 .factor .fscore { width: 40px; text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
 .factor .meta { display: flex; align-items: center; gap: 8px; }
 .factor .meta .bar { flex: 1; margin: 6px 0 0; }
-.factor .w { font-size: 11px; color: var(--muted); margin-top: 6px; white-space: nowrap; }
 .factor .note { display: none; font-size: 14px; color: var(--muted); margin-top: 6px; }
 .factor.open .note { display: block; }
-.factor.off { opacity: .45; }
 .badge { font-size: 11px; font-weight: 700; padding: 2px 6px; border-radius: 6px; }
-.badge.pos { background: color-mix(in srgb, var(--s5) 18%, transparent); color: var(--s5); }
-.badge.neg { background: color-mix(in srgb, var(--s1) 18%, transparent); color: var(--s1); }
+.badge.pos { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
+.badge.neg { background: color-mix(in srgb, var(--neg) 18%, transparent); color: var(--neg); }
 
 .chart { padding: 12px 10px 8px; }
 .chart svg { width: 100%; height: auto; display: block; }
@@ -194,24 +183,19 @@ input[type=range] { width: 100%; accent-color: var(--accent); margin: 8px 0 0; }
 .plist .pitem.sel { color: var(--accent); font-weight: 700; }
 .plist .pitem .km { font-size: 13px; color: var(--muted); }
 
-/* Настройки модели */
-.wrow { padding: 10px 16px; border-top: 1px solid var(--line); }
-.wrow:first-child { border-top: 0; }
-.wrow .top { display: flex; justify-content: space-between; font-size: 15px; }
-.wrow .top b { font-variant-numeric: tabular-nums; }
-.wrow input { margin-top: 4px; }
+/* О модели */
 .about { padding: 14px 16px; font-size: 14px; color: var(--muted); }
 .about p { margin: 0 0 8px; }
 .about p:last-child { margin: 0; }
 
 .empty { text-align: center; padding: 40px 20px; }
 .empty p { color: var(--muted); }
-.notice { padding: 10px 14px; border-radius: 14px; font-size: 14px; margin-bottom: 12px; background: color-mix(in srgb, var(--s2) 16%, var(--card)); }
+.notice { padding: 10px 14px; border-radius: 14px; font-size: 14px; margin-bottom: 12px; background: color-mix(in srgb, var(--accent) 14%, var(--card)); border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent); }
 
 .toast {
   position: fixed; left: 50%; transform: translate(-50%, 20px); opacity: 0; pointer-events: none;
   bottom: calc(env(safe-area-inset-bottom) + 84px); z-index: 20;
-  background: #13252d; color: #fff; padding: 10px 16px; border-radius: 14px; font-size: 14px;
+  background: #2c3743; color: var(--text); padding: 10px 16px; border-radius: 14px; font-size: 14px;
   max-width: calc(100% - 32px); transition: .25s; box-shadow: var(--shadow);
 }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }

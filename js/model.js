@@ -78,10 +78,6 @@ function trendText(d3) {
   return speed + (d3 > 0 ? 'растёт' : 'падает');
 }
 
-export function effectiveWeights(sp, overrides) {
-  return { ...sp.weights, ...(overrides && overrides[sp.id] || {}) };
-}
-
 export function scoreHour(sp, h, series, weights) {
   const f = {};
   const name = sp.name.toLowerCase();

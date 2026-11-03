@@ -2,7 +2,7 @@ import { PLACES, nearestPlace } from './places.js';
 import { fetchWeather, loadCached, saveCache, clearCache, buildSeries, nowIndex, weatherText, windDirText } from './weather.js';
 import { moonSvg } from './astro.js';
 import { SPECIES, speciesById, seasonKey } from './fish.js';
-import { FACTORS, scoreHour, summarize, verdict, scoreColor, effectiveWeights } from './model.js';
+import { scoreHour, summarize, verdict, scoreColor } from './model.js';
 
 const LS = { place: 'klev:place', weights: 'klev:weights' };
 const STALE_MS = 30 * 60 * 1000;
@@ -14,7 +14,6 @@ const saveJSON = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); }
 
 const state = {
   place: loadJSON(LS.place) || PLACES.find(p => p.id === 'samara'),
-  overrides: loadJSON(LS.weights) || {},
   entry: null,
   series: null,
   scores: null,
@@ -22,7 +21,6 @@ const state = {
   hourOffset: 0,
   detailDay: null,
   loading: false,
-  settingsSp: SPECIES[0].id,
   placeQuery: '',
 };
 
@@ -42,8 +40,7 @@ function recompute() {
   const series = buildSeries(e.raw, e.place.lat);
   const scores = {};
   for (const sp of SPECIES) {
-    const w = effectiveWeights(sp, state.overrides);
-    scores[sp.id] = series.hours.map(h => scoreHour(sp, h, series, w));
+    scores[sp.id] = series.hours.map(h => scoreHour(sp, h, series, sp.weights));
   }
   state.series = series;
   state.scores = scores;
@@ -261,6 +258,7 @@ function renderHome() {
   const max = Math.min(71, state.series.hours.length - 1 - ni);
   const sun = h.day ? `Восход ${timeOf(h.day.sunrise, state.series.offset)} · закат ${timeOf(h.day.sunset, state.series.offset)}` : '';
   return `
+    <h1 class="app-title">Клёв на Волге</h1>
     <div class="cond" id="cond">${condHtml(h)}</div>
     <div class="card timepick">
       <div class="row"><span>Прогноз на: <b id="tlabel">${timeLabel(i)}</b></span><span class="muted small" id="sun">${sun}</span></div>
@@ -340,16 +338,15 @@ function renderDetail(id) {
     <div class="section"><h2>Почему такой прогноз</h2><span class="sub">нажмите на фактор</span></div>
     <div class="card factors">
       ${factors.map(f => `
-        <div class="factor ${f.weight === 0 ? 'off' : ''}" data-action="toggle">
+        <div class="factor" data-action="toggle">
           <div class="top"><span class="fname">${f.name}
             ${posIds.has(f.id) ? '<span class="badge pos">помогает</span>' : negIds.has(f.id) ? '<span class="badge neg">мешает</span>' : ''}</span>
             <span class="fval">${f.value}</span><span class="fscore" style="color:${scoreColor(f.score * 100)}">${Math.round(f.score * 100)}</span></div>
-          <div class="meta">${bar(Math.round(f.score * 100))}<span class="w">вес ${fmt(f.weight)}</span></div>
+          <div class="meta">${bar(Math.round(f.score * 100))}</div>
           <div class="note">${f.note}</div>
         </div>`).join('')}
       <div class="factor" style="cursor:default"><div class="small muted">
-        Сводная оценка факторов: <b>${Math.round(res.shaped * 100)}%</b>${res.gates.map(g => ` × ${g.name} ${fmt(g.k, 2)}`).join('')}${res.storm ? ' × шторм 0,55' : ''} = <b>${res.pct}%</b>.
-        <a href="#/settings?sp=${sp.id}" style="color:var(--accent);font-weight:600">Настроить веса</a></div></div>
+        Сводная оценка факторов: <b>${Math.round(res.shaped * 100)}%</b>${res.gates.map(g => ` × ${g.name} ${fmt(g.k, 2)}`).join('')}${res.storm ? ' × шторм 0,55' : ''} = <b>${res.pct}%</b>.</div></div>
     </div>
 
     <div class="section" id="hourly"><h2>По часам</h2><span class="sub">лучшее: ${bwDay.label}, ${bwDay.max}%</span></div>
@@ -458,27 +455,10 @@ function renderPlace() {
 
 // ——— Настройки модели ———
 
-function renderSettings(query) {
-  if (query.sp && speciesById(query.sp)) state.settingsSp = query.sp;
-  const sp = speciesById(state.settingsSp);
-  const w = effectiveWeights(sp, state.overrides);
-  const changed = state.overrides[sp.id] && Object.keys(state.overrides[sp.id]).length;
+function renderSettings() {
   const e = state.entry;
   return `
-    <div class="section" style="margin-top:4px"><h2>Веса факторов</h2><span class="sub">0 — фактор отключён</span></div>
-    <div class="chips">${SPECIES.map(s => `<button class="chip ${s.id === sp.id ? 'active' : ''}" data-action="sp" data-id="${s.id}">${s.name}</button>`).join('')}</div>
-    <div class="card">
-      ${FACTORS.map(f => `<div class="wrow">
-        <div class="top"><span>${f.name}${w[f.id] !== sp.weights[f.id] ? ' <span class="badge pos">изм.</span>' : ''}</span><b id="wv-${f.id}">${fmt(w[f.id])}</b></div>
-        <input type="range" min="0" max="5" step="0.5" value="${w[f.id]}" data-weight="${f.id}" aria-label="${f.name}">
-      </div>`).join('')}
-    </div>
-    <div style="display:flex;gap:8px;margin-top:10px">
-      <button class="btn secondary" style="flex:1" data-action="reset-sp" ${changed ? '' : 'disabled'}>Сбросить: ${sp.name.toLowerCase()}</button>
-      <button class="btn secondary" style="flex:1" data-action="reset-all">Сбросить все</button>
-    </div>
-
-    <div class="section"><h2>Данные</h2></div>
+    <div class="section" style="margin-top:4px"><h2>Данные</h2></div>
     <div class="card about">
       <p>Источник погоды — Open-Meteo: давление у поверхности, ветер и порывы, температура, облачность, осадки за 7 прошедших и 8 будущих дней.
       ${e ? `Последнее обновление: ${new Date(e.fetchedAt).toLocaleString('ru-RU', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })}.` : ''}</p>
@@ -492,7 +472,7 @@ function renderSettings(query) {
     <div class="section"><h2>Как считается прогноз</h2></div>
     <div class="card about">
       <p>Для каждого вида задана своя модель: предпочтения по сезону, температуре воды, уровню и тренду давления, ветру, облачности, осадкам, времени суток относительно восхода и заката и фазе луны. Каждый фактор даёт оценку 0–100.</p>
-      <p>Оценки сводятся взвешенным гармоническим средним: один плохой фактор тянет итог вниз сильнее, чем хороший — вверх. Веса можно менять выше. Если вид не в сезоне, вода для него слишком холодная или тёплая или сейчас не его время суток, итог дополнительно снижается; при штормовом ветре — почти вдвое.</p>
+      <p>Важность факторов для каждого вида уже подобрана. Оценки сводятся взвешенным гармоническим средним: один плохой фактор тянет итог вниз сильнее, чем хороший — вверх. Если вид не в сезоне, вода для него слишком холодная или тёплая или сейчас не его время суток, итог дополнительно снижается; при штормовом ветре — почти вдвое.</p>
       <p>Температура воды оценивается по климатической норме для широты и сглаженной температуре воздуха за последние дни — это приближение, а не замер.</p>
       <p>Прогноз — ориентир, а не гарантия. Соблюдайте правила рыболовства и сроки нерестовых запретов вашего региона.</p>
     </div>`;
@@ -519,7 +499,7 @@ function render() {
     html = renderDetail(parts[1]);
   } else if (parts[0] === 'days') html = renderDays();
   else if (parts[0] === 'place') html = renderPlace();
-  else if (parts[0] === 'settings') html = renderSettings(query);
+  else if (parts[0] === 'settings') html = renderSettings();
   else html = renderHome();
   view.innerHTML = html;
   const routeChanged = location.hash !== lastRoute;
@@ -548,17 +528,8 @@ view.addEventListener('click', e => {
     state.detailDay = +el.dataset.day;
     render();
     if (el.dataset.scroll) document.getElementById('hourly')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  } else if (a === 'sp') { state.settingsSp = el.dataset.id; location.hash = `#/settings?sp=${el.dataset.id}`; }
-  else if (a === 'reset-sp') { delete state.overrides[state.settingsSp]; saveWeights(); }
-  else if (a === 'reset-all') { state.overrides = {}; saveWeights(); toast('Веса всех моделей сброшены'); }
-  else if (a === 'clear-cache') { clearCache(); state.entry = null; recompute(); render(); refresh(true); }
+  } else if (a === 'clear-cache') { clearCache(); state.entry = null; recompute(); render(); refresh(true); }
 });
-
-function saveWeights() {
-  saveJSON(LS.weights, state.overrides);
-  recompute();
-  render();
-}
 
 view.addEventListener('input', e => {
   const t = e.target;
@@ -568,20 +539,7 @@ view.addEventListener('input', e => {
     const tmp = document.createElement('div');
     tmp.innerHTML = renderPlace();
     $('#plist').innerHTML = tmp.querySelector('#plist').innerHTML;
-  } else if (t.dataset.weight) $('#wv-' + t.dataset.weight).textContent = fmt(+t.value);
-});
-
-view.addEventListener('change', e => {
-  const t = e.target;
-  if (!t.dataset.weight) return;
-  const sp = speciesById(state.settingsSp);
-  const v = +t.value;
-  const o = state.overrides[sp.id] = state.overrides[sp.id] || {};
-  if (v === sp.weights[t.dataset.weight]) delete o[t.dataset.weight]; else o[t.dataset.weight] = v;
-  if (!Object.keys(o).length) delete state.overrides[sp.id];
-  const y = window.scrollY;
-  saveWeights();
-  window.scrollTo(0, y);
+  }
 });
 
 $('#refreshBtn').addEventListener('click', () => refresh(true));
@@ -596,10 +554,19 @@ document.addEventListener('visibilitychange', () => {
 
 // ——— Старт ———
 
+try { localStorage.removeItem(LS.weights); } catch { /* ignore */ } // веса больше не настраиваются
 loadEntryForPlace();
 render();
 refresh();
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(err => console.warn('SW', err)));
+  // новая версия приложения установилась — перезагружаем страницу один раз
+  const hadController = !!navigator.serviceWorker.controller;
+  let reloaded = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (reloaded || !hadController) return;
+    reloaded = true;
+    location.reload();
+  });
 }
