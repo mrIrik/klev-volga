@@ -1,5 +1,5 @@
 // Service worker: файлы приложения — сначала сеть, без сети — кэш. Погода кэшируется в localStorage.
-const VERSION = 'klev-v5';
+const VERSION = 'klev-v6';
 const SHELL = [
   './', './index.html', './styles.css', './manifest.webmanifest',
   './js/app.js', './js/art.js', './js/astro.js', './js/fish.js', './js/model.js', './js/places.js', './js/weather.js',

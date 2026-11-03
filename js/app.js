@@ -1,5 +1,5 @@
 import { PLACES, nearestPlace } from './places.js';
-import { fetchWeather, loadCached, saveCache, clearCache, buildSeries, nowIndex, weatherText, windDirText } from './weather.js';
+import { fetchWeather, mergeHistory, SOURCE_NAMES, loadCached, saveCache, clearCache, buildSeries, nowIndex, weatherText, windDirText } from './weather.js';
 import { moonSvg } from './astro.js';
 import { SPECIES, speciesById, seasonKey } from './fish.js';
 import { scoreHour, summarize, verdict, scoreColor } from './model.js';
@@ -12,8 +12,14 @@ const WD = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
 const loadJSON = k => { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } };
 const saveJSON = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* ignore */ } };
 
+// сохранённую точку из списка берём из актуального списка (там могли появиться новые поля)
+function restorePlace(saved) {
+  if (saved && saved.gps) return saved;
+  return (saved && PLACES.find(p => p.id === saved.id)) || PLACES.find(p => p.id === 'samara');
+}
+
 const state = {
-  place: loadJSON(LS.place) || PLACES.find(p => p.id === 'samara'),
+  place: restorePlace(loadJSON(LS.place)),
   entry: null,
   series: null,
   scores: null,
@@ -123,8 +129,11 @@ async function refresh(force = false) {
   renderStatus();
   const p = state.place;
   try {
-    const raw = await fetchWeather(p.lat, p.lon);
+    const tz = p.tz != null ? p.tz * 3600 : -new Date().getTimezoneOffset() * 60;
+    let raw = await fetchWeather(p.lat, p.lon, tz);
     if (placeKey(p) !== placeKey(state.place)) return;
+    // у запасного источника нет прошлых часов — берём их из прежнего прогноза для трендов давления
+    if (raw.source === 'met' && state.entry) raw = mergeHistory(raw, state.entry.raw);
     const entry = { raw, fetchedAt: Date.now(), place: { ...p } };
     const prev = state.entry;
     state.entry = entry;
@@ -215,7 +224,7 @@ function ring(pct, size = 92) {
 }
 
 const ERROR_HINTS = {
-  network: 'Сервер погоды Open-Meteo недоступен из этой сети. Так бывает при ограничениях мобильного интернета, в корпоративном Wi-Fi или с блокировщиками рекламы и VPN. Попробуйте другую сеть (например, домашний Wi-Fi).',
+  network: 'Серверы погоды (Open-Meteo и запасной MET Norway) недоступны из этой сети. Так бывает при ограничениях мобильного интернета или в корпоративном Wi-Fi. Попробуйте другую сеть или включите VPN один раз — прогноз сохранится на 8 дней.',
   timeout: 'Сервер погоды не ответил вовремя — вероятно, медленное соединение. Попробуйте ещё раз.',
   http: 'Сервер погоды вернул ошибку. Если это 429 — превышен лимит запросов с вашего IP, попробуйте позже или через другую сеть.',
   format: 'Сервер погоды прислал неожиданные данные.',
@@ -484,8 +493,8 @@ function renderSettings() {
   return `
     <div class="section" style="margin-top:4px"><h2>Данные</h2></div>
     <div class="card about">
-      <p>Источник погоды — Open-Meteo: давление у поверхности, ветер и порывы, температура, облачность, осадки за 7 прошедших и 8 будущих дней.
-      ${e ? `Последнее обновление: ${new Date(e.fetchedAt).toLocaleString('ru-RU', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })}.` : ''}</p>
+      <p>Основной источник погоды — Open-Meteo: давление у поверхности, ветер и порывы, температура, облачность, осадки за 7 прошедших и 8 будущих дней. Если он недоступен из вашей сети, приложение само переключается на MET Norway (метеослужба Норвегии, прогноз на 10 дней без истории — тренды давления первые часы считаются по прогнозу).
+      ${e ? `Последнее обновление: ${new Date(e.fetchedAt).toLocaleString('ru-RU', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })}, источник — ${SOURCE_NAMES[e.raw.source || 'om']}.` : ''}</p>
       <p>Без сети приложение показывает последний сохранённый прогноз для выбранного места.</p>
       <div style="display:flex;gap:8px;margin-top:10px">
         <button class="btn" style="flex:1" data-action="refresh">Обновить</button>

@@ -1,11 +1,36 @@
 // Загрузка погоды из Open-Meteo, кэш и производные величины
-import { moonInfo } from './astro.js';
+import { moonInfo, sunTimes } from './astro.js';
 
 const API = 'https://api.open-meteo.com/v1/forecast';
 const HPA_TO_MM = 0.750062;
 const CACHE_PREFIX = 'klev:weather:';
 
-export async function fetchWeather(lat, lon) {
+// Источники погоды по очереди: Open-Meteo (с историей за 7 дней) и MET Norway (запасной,
+// если Open-Meteo недоступен из сети). Последний сработавший источник пробуем первым.
+const SOURCE_KEY = 'klev:source';
+export const SOURCE_NAMES = { om: 'Open-Meteo', met: 'MET Norway' };
+
+export async function fetchWeather(lat, lon, tzOffset) {
+  let preferred = 'om';
+  try { preferred = localStorage.getItem(SOURCE_KEY) || 'om'; } catch { /* ignore */ }
+  const order = preferred === 'met' ? ['met', 'om'] : ['om', 'met'];
+  const errors = [];
+  let firstErr = null;
+  for (const src of order) {
+    try {
+      const raw = src === 'om' ? await fetchOpenMeteo(lat, lon) : await fetchMet(lat, lon, tzOffset);
+      raw.source = src;
+      try { localStorage.setItem(SOURCE_KEY, src); } catch { /* ignore */ }
+      return raw;
+    } catch (err) {
+      errors.push(`${SOURCE_NAMES[src]}: ${err.message}`);
+      firstErr = firstErr || err;
+    }
+  }
+  throw weatherError(firstErr.kind, errors.join('; '), firstErr.status);
+}
+
+function fetchOpenMeteo(lat, lon) {
   const params = new URLSearchParams({
     latitude: lat.toFixed(4),
     longitude: lon.toFixed(4),
@@ -17,19 +42,10 @@ export async function fetchWeather(lat, lon) {
     past_days: '7',
     forecast_days: '8',
   });
-  const url = `${API}?${params}`;
-  let lastErr;
-  // две попытки: мобильная сеть часто теряет первый запрос
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      return await fetchOnce(url, attempt === 0 ? 20000 : 30000);
-    } catch (err) {
-      lastErr = err;
-      if (err.kind === 'http' && err.status !== 429 && err.status < 500) break;
-      await new Promise(r => setTimeout(r, 1500));
-    }
-  }
-  throw lastErr;
+  return fetchJson(`${API}?${params}`, 15000, 'Open-Meteo').then(raw => {
+    if (!raw || !raw.hourly || !raw.hourly.time || !raw.daily) throw weatherError('format', raw && raw.reason ? raw.reason : 'некорректный ответ');
+    return raw;
+  });
 }
 
 function weatherError(kind, message, status) {
@@ -39,7 +55,7 @@ function weatherError(kind, message, status) {
   return e;
 }
 
-async function fetchOnce(url, timeoutMs) {
+async function fetchJson(url, timeoutMs, name) {
   const ctrl = typeof AbortController === 'function' ? new AbortController() : null;
   const timer = ctrl && setTimeout(() => ctrl.abort(), timeoutMs);
   let res;
@@ -47,15 +63,104 @@ async function fetchOnce(url, timeoutMs) {
     res = await fetch(url, ctrl ? { signal: ctrl.signal } : {});
   } catch (err) {
     throw err && err.name === 'AbortError'
-      ? weatherError('timeout', `Нет ответа от Open-Meteo за ${timeoutMs / 1000} с`)
-      : weatherError('network', `Сетевая ошибка: ${(err && err.message) || err}`);
+      ? weatherError('timeout', `нет ответа за ${timeoutMs / 1000} с`)
+      : weatherError('network', `сетевая ошибка (${(err && err.message) || err})`);
   } finally {
     if (timer) clearTimeout(timer);
   }
-  if (!res.ok) throw weatherError('http', `Open-Meteo ответил ${res.status}`, res.status);
-  let raw;
-  try { raw = await res.json(); } catch { throw weatherError('format', 'Ответ Open-Meteo не читается'); }
-  if (!raw || !raw.hourly || !raw.hourly.time || !raw.daily) throw weatherError('format', raw && raw.reason ? `Open-Meteo: ${raw.reason}` : 'Некорректный ответ Open-Meteo');
+  if (!res.ok) throw weatherError('http', `${name} ответил ${res.status}`, res.status);
+  try { return await res.json(); } catch { throw weatherError('format', 'ответ не читается'); }
+}
+
+// ——— MET Norway → формат Open-Meteo ———
+
+const MET_API = 'https://api.met.no/weatherapi/locationforecast/2.0/complete';
+
+async function fetchMet(lat, lon, tzOffset) {
+  const json = await fetchJson(`${MET_API}?lat=${lat.toFixed(4)}&lon=${lon.toFixed(4)}`, 15000, 'MET Norway');
+  if (!json || !json.properties || !json.properties.timeseries || !json.properties.timeseries.length) throw weatherError('format', 'некорректный ответ');
+  return metToRaw(json, lat, lon, tzOffset);
+}
+
+function metCode(sym) {
+  const s = sym || '';
+  if (s.includes('thunder')) return 95;
+  if (s.includes('snow')) return s.includes('heavy') ? 75 : s.includes('light') ? 71 : 73;
+  if (s.includes('sleet')) return 66;
+  if (s.includes('rainshowers')) return s.includes('heavy') ? 82 : s.includes('light') ? 80 : 81;
+  if (s.includes('rain')) return s.includes('heavy') ? 65 : s.includes('light') ? 61 : 63;
+  if (s.includes('fog')) return 45;
+  if (s.startsWith('cloudy')) return 3;
+  if (s.startsWith('partlycloudy')) return 2;
+  if (s.startsWith('fair')) return 1;
+  return 0;
+}
+
+function metToRaw(json, lat, lon, off) {
+  const elevation = (json.geometry && json.geometry.coordinates && json.geometry.coordinates[2]) || 0;
+  const k = Math.exp(-elevation / 8400); // давление на уровне моря → у поверхности
+  const pts = json.properties.timeseries.map(e => {
+    const d = e.data.instant.details;
+    const n1 = e.data.next_1_hours, n6 = e.data.next_6_hours;
+    return {
+      t: Date.parse(e.time) / 1000,
+      temp: d.air_temperature, p: d.air_pressure_at_sea_level * k, cloud: d.cloud_area_fraction,
+      wind: d.wind_speed, dir: d.wind_from_direction, gust: d.wind_speed_of_gust,
+      precip: n1 ? n1.details.precipitation_amount : n6 ? n6.details.precipitation_amount / 6 : 0,
+      code: metCode((n1 || n6 || e.data.next_12_hours || { summary: {} }).summary.symbol_code),
+    };
+  }).filter(x => x.temp != null && x.p > 0);
+  const H = { time: [], temperature_2m: [], surface_pressure: [], cloud_cover: [], precipitation: [], wind_speed_10m: [], wind_direction_10m: [], wind_gusts_10m: [], weather_code: [] };
+  let j = 0;
+  for (let t = Math.ceil(pts[0].t / 3600) * 3600; t <= pts[pts.length - 1].t; t += 3600) {
+    while (j < pts.length - 2 && pts[j + 1].t <= t) j++;
+    const a = pts[j], b = pts[Math.min(j + 1, pts.length - 1)];
+    const f = b.t > a.t ? (t - a.t) / (b.t - a.t) : 0;
+    const lerp = key => a[key] + (b[key] - a[key]) * f;
+    const near = f < 0.5 ? a : b;
+    H.time.push(t);
+    H.temperature_2m.push(lerp('temp'));
+    H.surface_pressure.push(lerp('p'));
+    H.cloud_cover.push(lerp('cloud'));
+    H.precipitation.push(a.precip);
+    H.wind_speed_10m.push(lerp('wind'));
+    H.wind_direction_10m.push(near.dir);
+    H.wind_gusts_10m.push(a.gust != null && b.gust != null ? lerp('gust') : lerp('wind') * 1.6);
+    H.weather_code.push(near.code);
+  }
+  // восход и закат по каждой местной дате прогноза
+  const daily = { time: [], sunrise: [], sunset: [] };
+  const first = H.time[0] + off, last = H.time[H.time.length - 1] + off;
+  for (let d = Math.floor(first / 86400) * 86400; d <= last; d += 86400) {
+    const dt = new Date(d * 1000);
+    const st = sunTimes(dt.getUTCFullYear(), dt.getUTCMonth(), dt.getUTCDate(), lat, lon);
+    daily.time.push(d - off);
+    daily.sunrise.push(st.rise);
+    daily.sunset.push(st.set);
+  }
+  return { hourly: H, daily, utc_offset_seconds: off, elevation, timezone_abbreviation: `UTC+${off / 3600}` };
+}
+
+// Подставляет прошлые часы из прежнего прогноза (нужно для трендов давления у источника без истории)
+export function mergeHistory(raw, prev) {
+  if (!prev || !prev.hourly || !prev.hourly.time || !raw.hourly.time.length) return raw;
+  const start = raw.hourly.time[0], from = start - 7 * 86400;
+  const idx = prev.hourly.time.map((t, i) => (t >= from && t < start ? i : -1)).filter(i => i >= 0);
+  if (!idx.length) return raw;
+  if (Object.keys(raw.hourly).some(key => !prev.hourly[key])) return raw;
+  // источники считают давление немного по-разному — выравниваем старые значения на стыке,
+  // чтобы не получить ложный скачок давления
+  const oldP = prev.hourly.surface_pressure, last = idx[idx.length - 1];
+  const shift = raw.hourly.time[0] - prev.hourly.time[last] <= 3 * 3600 ? raw.hourly.surface_pressure[0] - oldP[last] : 0;
+  for (const key of Object.keys(raw.hourly)) {
+    const old = prev.hourly[key];
+    raw.hourly[key] = idx.map(i => (key === 'surface_pressure' ? old[i] + shift : old[i])).concat(raw.hourly[key]);
+  }
+  const days = new Map();
+  prev.daily.time.forEach((t, i) => days.set(t, [prev.daily.sunrise[i], prev.daily.sunset[i]]));
+  raw.daily.time.forEach((t, i) => days.set(t, [raw.daily.sunrise[i], raw.daily.sunset[i]]));
+  const keys = [...days.keys()].sort((a, b) => a - b);
+  raw.daily = { time: keys, sunrise: keys.map(t => days.get(t)[0]), sunset: keys.map(t => days.get(t)[1]) };
   return raw;
 }
 
@@ -147,10 +252,11 @@ export function buildSeries(raw, lat) {
   // тренды: давление за 3 ч и 24 ч, температура воздуха за 24 ч
   for (let i = 0; i < hours.length; i++) {
     const h = hours[i];
-    const back = k => hours[Math.max(0, i - k)];
-    h.d3 = h.p - back(3).p;
-    h.d24 = h.p - back(24).p;
-    h.t24 = h.air - back(24).air;
+    // без истории (начало ряда) берём изменение по прогнозу вперёд
+    const diff = (k, key) => i >= k ? h[key] - hours[i - k][key] : hours[Math.min(hours.length - 1, k)][key] - hours[0][key];
+    h.d3 = diff(3, 'p');
+    h.d24 = diff(24, 'p');
+    h.t24 = diff(24, 'air');
     h.hasHistory = i >= 24;
   }
   return {
@@ -159,6 +265,7 @@ export function buildSeries(raw, lat) {
     elevation: raw.elevation ?? 0,
     pNorm: pressureNorm(raw.elevation),
     tz: raw.timezone_abbreviation || raw.timezone || '',
+    source: raw.source || 'om',
   };
 }
 
