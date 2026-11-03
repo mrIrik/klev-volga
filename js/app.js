@@ -22,6 +22,7 @@ const state = {
   detailDay: null,
   loading: false,
   placeQuery: '',
+  lastError: null,
 };
 
 const $ = s => document.querySelector(s);
@@ -105,8 +106,12 @@ const timeOf = (unix, off) => { const d = new Date((unix + off) * 1000); return 
 function loadEntryForPlace() {
   const e = loadCached(placeKey(state.place));
   const p = state.place;
-  state.entry = e && Math.abs(e.place.lat - p.lat) < 0.05 && Math.abs(e.place.lon - p.lon) < 0.05 ? e : null;
-  recompute();
+  state.entry = e && e.place && Math.abs(e.place.lat - p.lat) < 0.05 && Math.abs(e.place.lon - p.lon) < 0.05 ? e : null;
+  try { recompute(); } catch (err) {
+    console.warn('Повреждённый кэш погоды', err);
+    state.entry = null;
+    recompute();
+  }
 }
 
 async function refresh(force = false) {
@@ -120,12 +125,20 @@ async function refresh(force = false) {
   try {
     const raw = await fetchWeather(p.lat, p.lon);
     if (placeKey(p) !== placeKey(state.place)) return;
-    state.entry = { raw, fetchedAt: Date.now(), place: { ...p } };
-    saveCache(placeKey(p), state.entry);
-    recompute();
+    const entry = { raw, fetchedAt: Date.now(), place: { ...p } };
+    const prev = state.entry;
+    state.entry = entry;
+    try { recompute(); } catch (err) {
+      state.entry = prev;
+      recompute();
+      throw Object.assign(new Error(`Ошибка обработки данных: ${err.message}`), { kind: 'format' });
+    }
+    saveCache(placeKey(p), entry);
+    state.lastError = null;
     if (force) toast('Прогноз обновлён');
   } catch (err) {
-    toast(state.entry ? 'Не удалось обновить — показаны сохранённые данные' : 'Не удалось загрузить погоду. Проверьте сеть.');
+    state.lastError = { kind: err.kind || 'other', message: err.message || String(err) };
+    toast(state.entry ? 'Не удалось обновить — показаны сохранённые данные' : 'Не удалось загрузить погоду');
     console.warn(err);
   } finally {
     state.loading = false;
@@ -201,11 +214,22 @@ function ring(pct, size = 92) {
     <div class="num" style="color:${scoreColor(pct)}">${pct}%</div></div>`;
 }
 
+const ERROR_HINTS = {
+  network: 'Сервер погоды Open-Meteo недоступен из этой сети. Так бывает при ограничениях мобильного интернета, в корпоративном Wi-Fi или с блокировщиками рекламы и VPN. Попробуйте другую сеть (например, домашний Wi-Fi).',
+  timeout: 'Сервер погоды не ответил вовремя — вероятно, медленное соединение. Попробуйте ещё раз.',
+  http: 'Сервер погоды вернул ошибку. Если это 429 — превышен лимит запросов с вашего IP, попробуйте позже или через другую сеть.',
+  format: 'Сервер погоды прислал неожиданные данные.',
+  other: 'Не удалось получить прогноз погоды.',
+};
+
 function emptyState() {
   if (state.loading) return `<div class="empty"><h2>Загружаем погоду…</h2><p>Open-Meteo, ${esc(state.place.name)}</p></div>`;
+  const err = state.lastError;
+  const hint = !navigator.onLine ? 'Нет сети, а сохранённых данных для этого места пока нет.' : ERROR_HINTS[err ? err.kind : 'other'] || ERROR_HINTS.other;
   return `<div class="empty"><h2>Нет данных</h2>
-    <p>${navigator.onLine ? 'Не удалось получить прогноз погоды.' : 'Нет сети, а сохранённых данных для этого места пока нет.'}</p>
-    <button class="btn" data-action="refresh">Повторить</button></div>`;
+    <p>${hint}</p>
+    <button class="btn" data-action="refresh">Повторить</button>
+    ${err ? `<p class="small muted" style="margin-top:18px;word-break:break-word">Подробности: ${esc(err.message)}</p>` : ''}</div>`;
 }
 
 function staleNotice() {

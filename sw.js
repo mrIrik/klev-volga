@@ -1,5 +1,5 @@
-// Service worker: оболочка приложения — из кэша, погода — сначала сеть, потом кэш
-const VERSION = 'klev-v4';
+// Service worker: файлы приложения — сначала сеть, без сети — кэш. Погода кэшируется в localStorage.
+const VERSION = 'klev-v5';
 const SHELL = [
   './', './index.html', './styles.css', './manifest.webmanifest',
   './js/app.js', './js/art.js', './js/astro.js', './js/fish.js', './js/model.js', './js/places.js', './js/weather.js',
@@ -13,7 +13,7 @@ self.addEventListener('install', e => {
 self.addEventListener('activate', e => {
   e.waitUntil(
     caches.keys()
-      .then(keys => Promise.all(keys.filter(k => k !== VERSION && k !== VERSION + '-api').map(k => caches.delete(k))))
+      .then(keys => Promise.all(keys.filter(k => k !== VERSION).map(k => caches.delete(k))))
       .then(() => self.clients.claim())
   );
 });
@@ -23,16 +23,7 @@ self.addEventListener('fetch', e => {
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
 
-  if (url.hostname === 'api.open-meteo.com') {
-    e.respondWith(
-      fetch(req).then(res => {
-        if (res.ok) { const copy = res.clone(); caches.open(VERSION + '-api').then(c => c.put(req, copy)); }
-        return res;
-      }).catch(() => caches.match(req, { cacheName: VERSION + '-api' }).then(r => r || Response.error()))
-    );
-    return;
-  }
-
+  // запросы к Open-Meteo и другим сайтам идут напрямую в сеть, без service worker
   if (url.origin !== location.origin) return;
 
   // файлы приложения: сначала сеть (чтобы обновления приходили сразу), без сети — кэш

@@ -17,17 +17,46 @@ export async function fetchWeather(lat, lon) {
     past_days: '7',
     forecast_days: '8',
   });
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 15000);
-  try {
-    const res = await fetch(`${API}?${params}`, { signal: ctrl.signal, cache: 'no-store' });
-    if (!res.ok) throw new Error(`Open-Meteo ответил ${res.status}`);
-    const raw = await res.json();
-    if (!raw.hourly || !raw.hourly.time) throw new Error('Некорректный ответ Open-Meteo');
-    return raw;
-  } finally {
-    clearTimeout(timer);
+  const url = `${API}?${params}`;
+  let lastErr;
+  // две попытки: мобильная сеть часто теряет первый запрос
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      return await fetchOnce(url, attempt === 0 ? 20000 : 30000);
+    } catch (err) {
+      lastErr = err;
+      if (err.kind === 'http' && err.status !== 429 && err.status < 500) break;
+      await new Promise(r => setTimeout(r, 1500));
+    }
   }
+  throw lastErr;
+}
+
+function weatherError(kind, message, status) {
+  const e = new Error(message);
+  e.kind = kind;
+  e.status = status;
+  return e;
+}
+
+async function fetchOnce(url, timeoutMs) {
+  const ctrl = typeof AbortController === 'function' ? new AbortController() : null;
+  const timer = ctrl && setTimeout(() => ctrl.abort(), timeoutMs);
+  let res;
+  try {
+    res = await fetch(url, ctrl ? { signal: ctrl.signal } : {});
+  } catch (err) {
+    throw err && err.name === 'AbortError'
+      ? weatherError('timeout', `Нет ответа от Open-Meteo за ${timeoutMs / 1000} с`)
+      : weatherError('network', `Сетевая ошибка: ${(err && err.message) || err}`);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+  if (!res.ok) throw weatherError('http', `Open-Meteo ответил ${res.status}`, res.status);
+  let raw;
+  try { raw = await res.json(); } catch { throw weatherError('format', 'Ответ Open-Meteo не читается'); }
+  if (!raw || !raw.hourly || !raw.hourly.time || !raw.daily) throw weatherError('format', raw && raw.reason ? `Open-Meteo: ${raw.reason}` : 'Некорректный ответ Open-Meteo');
+  return raw;
 }
 
 export function loadCached(key) {
